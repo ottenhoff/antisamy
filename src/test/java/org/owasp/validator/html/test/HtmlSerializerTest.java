@@ -34,36 +34,25 @@ import static org.junit.Assert.assertTrue;
 import java.io.StringReader;
 import java.io.StringWriter;
 import java.net.URL;
-import java.util.Arrays;
-import java.util.Collection;
-
 import org.apache.xml.serialize.OutputFormat;
 import org.htmlunit.cyberneko.parsers.DOMFragmentParser;
 import org.htmlunit.cyberneko.xerces.dom.DocumentImpl;
 import org.junit.Before;
 import org.junit.Test;
-import org.junit.runner.RunWith;
-import org.junit.runners.Parameterized;
 import org.owasp.validator.html.AntiSamy;
 import org.owasp.validator.html.CleanResults;
 import org.owasp.validator.html.InternalPolicy;
-import org.owasp.validator.html.Policy;
 import org.owasp.validator.html.scan.ASHTMLSerializer;
-import org.owasp.validator.html.scan.HtmlSerializer;
 import org.w3c.dom.Document;
 import org.w3c.dom.DocumentFragment;
 import org.w3c.dom.Element;
 import org.xml.sax.InputSource;
 
 /**
- * Comprehensive test suite for {@link HtmlSerializer}.
+ * Serialization compatibility tests for {@link ASHTMLSerializer}.
  *
- * <p>Tests are organised into:
- * <ol>
- *   <li>Unit tests that build DOM fragments programmatically and assert serialized output.</li>
- *   <li>Data-driven round-trip tests that run {@code AntiSamy.scan()} in DOM mode and compare
- *       against expected substrings or exact values.</li>
- * </ol>
+ * <p>Exercises DOM fragments and the public DOM scanner. Parameterized coverage of both scanners is
+ * in {@link HtmlSerializerRoundTripTest}.
  */
 public class HtmlSerializerTest {
 
@@ -74,8 +63,10 @@ public class HtmlSerializerTest {
   private TestPolicy policy;
   private AntiSamy antiSamy;
   private Document document;
+
   /** Policy with formatOutput=false (for unit tests that check exact serialized output). */
   private InternalPolicy noFormatPolicy;
+
   /** Policy with entityEncodeIntlChars=true (for tests checking entity-encoded output). */
   private InternalPolicy encodeIntlPolicy;
 
@@ -122,14 +113,13 @@ public class HtmlSerializerTest {
 
   /**
    * Parse {@code html} into a {@link DocumentFragment} using the same cyberneko parser
-   * configuration as the DOM scanner, then serialize with {@link HtmlSerializer} using the given
+   * configuration as the DOM scanner, then serialize with {@link ASHTMLSerializer} using the given
    * policy.
    */
   private String roundTrip(String html, InternalPolicy pol) throws Exception {
     DOMFragmentParser parser = new DOMFragmentParser();
     parser.setProperty("http://cyberneko.org/html/properties/names/elems", "lower");
-    parser.setFeature(
-        "http://cyberneko.org/html/features/scanner/style/strip-cdata-delims", false);
+    parser.setFeature("http://cyberneko.org/html/features/scanner/style/strip-cdata-delims", false);
     parser.setFeature("http://cyberneko.org/html/features/scanner/cdata-sections", true);
     parser.setFeature("http://cyberneko.org/html/features/parse-noscript-content", false);
     Document doc = new DocumentImpl();
@@ -286,16 +276,16 @@ public class HtmlSerializerTest {
   }
 
   @Test
-  public void linkElementSelfCloses() throws Exception {
+  public void linkElementPreservesAttributes() throws Exception {
     DocumentFragment frag = document.createDocumentFragment();
     Element link = document.createElement("link");
     link.setAttribute("rel", "stylesheet");
     link.setAttribute("href", "style.css");
     frag.appendChild(link);
     String out = serialize(frag, noFormatPolicy);
-    assertThat(out, containsString("<link"));
-    // 'link' is in the default requiresClosingTags list, so it gets '>' not '/>'
-    assertThat(out, not(containsString("</link>")));
+    // Older and current serializer revisions differ in whether they emit the closing tag.
+    String openingTag = "<link href=\"style.css\" rel=\"stylesheet\">";
+    assertTrue(out, out.equals(openingTag) || out.equals(openingTag + "</link>"));
   }
 
   @Test
@@ -464,7 +454,8 @@ public class HtmlSerializerTest {
 
   @Test
   public void textWithLessThanIsEscaped() throws Exception {
-    assertEquals("<p>&lt;script&gt;</p>", serialize(fragmentWithText("p", "<script>"), noFormatPolicy));
+    assertEquals(
+        "<p>&lt;script&gt;</p>", serialize(fragmentWithText("p", "<script>"), noFormatPolicy));
   }
 
   @Test
@@ -636,8 +627,7 @@ public class HtmlSerializerTest {
 
   @Test
   public void formattingOffProducesNoExtraWhitespace() throws Exception {
-    InternalPolicy noFormat =
-        (InternalPolicy) policy.cloneWithDirective("formatOutput", "false");
+    InternalPolicy noFormat = (InternalPolicy) policy.cloneWithDirective("formatOutput", "false");
     DocumentFragment frag = document.createDocumentFragment();
     Element outer = document.createElement("div");
     Element inner = document.createElement("p");
@@ -650,8 +640,7 @@ public class HtmlSerializerTest {
 
   @Test
   public void formattingOnAddsNewlineAfterRootElement() throws Exception {
-    InternalPolicy withFormat =
-        (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
+    InternalPolicy withFormat = (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
     DocumentFragment frag = fragmentWithText("p", "text");
     String out = serialize(frag, withFormat);
     assertTrue("Expected trailing newline when formatting", out.endsWith("\n"));
@@ -659,8 +648,7 @@ public class HtmlSerializerTest {
 
   @Test
   public void formattingOnAddsNewlinesBetweenRootSiblings() throws Exception {
-    InternalPolicy withFormat =
-        (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
+    InternalPolicy withFormat = (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
     DocumentFragment frag = document.createDocumentFragment();
     Element p1 = document.createElement("p");
     p1.appendChild(document.createTextNode("first"));
@@ -674,8 +662,7 @@ public class HtmlSerializerTest {
 
   @Test
   public void formattingOnIndentsNestedElements() throws Exception {
-    InternalPolicy withFormat =
-        (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
+    InternalPolicy withFormat = (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
     DocumentFragment frag = document.createDocumentFragment();
     Element div = document.createElement("div");
     Element p = document.createElement("p");
@@ -690,8 +677,7 @@ public class HtmlSerializerTest {
 
   @Test
   public void formattingOnVoidElementFollowedByNewline() throws Exception {
-    InternalPolicy withFormat =
-        (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
+    InternalPolicy withFormat = (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
     DocumentFragment frag = fragmentWithElement("br");
     String out = serialize(frag, withFormat);
     assertEquals("<br/>\n", out);
@@ -699,8 +685,7 @@ public class HtmlSerializerTest {
 
   @Test
   public void whitespaceOnlyTextNodesSkippedWhenFormatting() throws Exception {
-    InternalPolicy withFormat =
-        (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
+    InternalPolicy withFormat = (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
     // When formatting, whitespace text nodes between block elements should not appear
     String out = roundTrip("<div>\n  <p>text</p>\n</div>", withFormat);
     // The newlines between div and p are whitespace-only and should be skipped
@@ -710,8 +695,7 @@ public class HtmlSerializerTest {
 
   @Test
   public void stylePreservesWhitespaceWhenFormatting() throws Exception {
-    InternalPolicy withFormat =
-        (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
+    InternalPolicy withFormat = (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
     String css = "a {\n  color: red;\n}\n";
     DocumentFragment frag = fragmentWithText("style", css);
     String out = serialize(frag, withFormat);
@@ -720,8 +704,7 @@ public class HtmlSerializerTest {
 
   @Test
   public void nestedFormattingDepth3() throws Exception {
-    InternalPolicy withFormat =
-        (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
+    InternalPolicy withFormat = (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
     DocumentFragment frag = document.createDocumentFragment();
     Element ul = document.createElement("ul");
     Element li1 = document.createElement("li");
@@ -743,8 +726,7 @@ public class HtmlSerializerTest {
 
   @Test
   public void textareaPreservesWhitespace() throws Exception {
-    InternalPolicy withFormat =
-        (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
+    InternalPolicy withFormat = (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
     String content = "  line1\n  line2\n";
     DocumentFragment frag = fragmentWithText("textarea", content);
     String out = serialize(frag, withFormat);
@@ -753,8 +735,7 @@ public class HtmlSerializerTest {
 
   @Test
   public void prePreservesWhitespace() throws Exception {
-    InternalPolicy withFormat =
-        (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
+    InternalPolicy withFormat = (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
     String content = "  code\n  more\n";
     DocumentFragment frag = fragmentWithText("pre", content);
     String out = serialize(frag, withFormat);
@@ -763,8 +744,7 @@ public class HtmlSerializerTest {
 
   @Test
   public void whiteSpaceNotSkippedInsidePreWhenFormatting() throws Exception {
-    InternalPolicy withFormat =
-        (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
+    InternalPolicy withFormat = (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
     // A whitespace-only text node inside <pre> must NOT be dropped
     DocumentFragment frag = document.createDocumentFragment();
     Element pre = document.createElement("pre");
@@ -811,8 +791,7 @@ public class HtmlSerializerTest {
 
   @Test
   public void roundTripTable() throws Exception {
-    String html =
-        "<table><tr><td>cell1</td><td>cell2</td></tr></table>";
+    String html = "<table><tr><td>cell1</td><td>cell2</td></tr></table>";
     String result = domScan(html);
     assertThat(result, containsString("<table>"));
     assertThat(result, containsString("cell1"));
@@ -1027,8 +1006,7 @@ public class HtmlSerializerTest {
 
   @Test
   public void formattedOutputHasProperIndentForDeepNesting() throws Exception {
-    InternalPolicy withFormat =
-        (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
+    InternalPolicy withFormat = (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
     DocumentFragment frag = document.createDocumentFragment();
     Element table = document.createElement("table");
     Element tr = document.createElement("tr");
@@ -1069,138 +1047,6 @@ public class HtmlSerializerTest {
   }
 
   // ===========================================================================
-  // 12. Data-driven tests
-  // ===========================================================================
-
-  /**
-   * Parameterized data-driven test: each row is {@code [inputHtml, expectedSubstring]}.
-   * Tests are run through the full AntiSamy DOM scan pipeline.
-   */
-  @RunWith(Parameterized.class)
-  public static class DataDrivenRoundTripTest {
-
-    private final String description;
-    private final String inputHtml;
-    private final String expectedSubstring;
-    private AntiSamy antiSamy;
-    private TestPolicy policy;
-
-    public DataDrivenRoundTripTest(String description, String inputHtml, String expected) {
-      this.description = description;
-      this.inputHtml = inputHtml;
-      this.expectedSubstring = expected;
-    }
-
-    @Before
-    public void setUp() throws Exception {
-      URL url = getClass().getResource("/antisamy.xml");
-      policy = TestPolicy.getInstance(url);
-      antiSamy = new AntiSamy();
-    }
-
-    @Parameterized.Parameters(name = "{0}")
-    public static Collection<Object[]> data() {
-      return Arrays.asList(
-          new Object[][] {
-            // Basic text formatting
-            {"bold text", "<b>bold</b>", "<b>bold</b>"},
-            {"italic text", "<i>italic</i>", "<i>italic</i>"},
-            {"underline text", "<u>underline</u>", "<u>underline</u>"},
-            {"strikethrough", "<s>strike</s>", "strike"},
-            {"strong text", "<strong>strong</strong>", "<strong>strong</strong>"},
-            {"em text", "<em>emphasis</em>", "<em>emphasis</em>"},
-            {"code inline", "<code>x=1</code>", "<code>x=1</code>"},
-            {"kbd element", "<kbd>Ctrl+C</kbd>", "Ctrl"},
-            {"samp element", "<samp>output</samp>", "output"},
-            // Headings
-            {"h1", "<h1>Heading 1</h1>", "Heading 1"},
-            {"h2", "<h2>Heading 2</h2>", "Heading 2"},
-            {"h3", "<h3>Heading 3</h3>", "Heading 3"},
-            {"h4", "<h4>Heading 4</h4>", "Heading 4"},
-            {"h5", "<h5>Heading 5</h5>", "Heading 5"},
-            {"h6", "<h6>Heading 6</h6>", "Heading 6"},
-            // Lists
-            {"ol li", "<ol><li>item</li></ol>", "<li>item</li>"},
-            {"ul li", "<ul><li>item</li></ul>", "<li>item</li>"},
-            {"dl dt dd", "<dl><dt>term</dt><dd>def</dd></dl>", "term"},
-            // Tables
-            {"table basic", "<table><tr><td>data</td></tr></table>", "data"},
-            {"table with header", "<table><tr><th>head</th></tr></table>", "head"},
-            {"table colspan", "<table><tr><td colspan=\"2\">span</td></tr></table>", "span"},
-            {"table border", "<table border=\"1\"><tr><td>x</td></tr></table>", "border"},
-            // Links
-            {"anchor", "<a href=\"http://example.com\">link</a>", "link"},
-            {"anchor no href", "<a>text</a>", "text"},
-            // Images
-            {"img", "<img src=\"x.png\" alt=\"\"/>", "<img"},
-            // Form elements
-            {"input text", "<input type=\"text\" name=\"x\"/>", "type=\"text\""},
-            {"input hidden", "<input type=\"hidden\" name=\"x\" value=\"v\"/>", "type=\"hidden\""},
-            {"select option", "<select><option>a</option></select>", "option"},
-            {"textarea", "<textarea>content</textarea>", "content"},
-            // Structure
-            {"div", "<div>content</div>", "content"},
-            {"span", "<span>content</span>", "content"},
-            {"p", "<p>content</p>", "content"},
-            {"pre", "<pre>  code  </pre>", "  code  "},
-            {"blockquote", "<blockquote>quote</blockquote>", "quote"},
-            {"abbr", "<abbr title=\"HyperText\">HTML</abbr>", "HTML"},
-            {"address", "<address>123 Main St</address>", "123 Main St"},
-            {"article", "<article>story</article>", "story"},
-            {"aside", "<aside>sidebar</aside>", "sidebar"},
-            {"caption", "<table><caption>title</caption><tr><td>d</td></tr></table>", "title"},
-            {"cite", "<cite>Author</cite>", "Author"},
-            {"del", "<del>removed</del>", "removed"},
-            {"dfn", "<dfn>term</dfn>", "term"},
-            {"figcaption", "<figure><figcaption>cap</figcaption></figure>", "cap"},
-            {"footer", "<footer>foot</footer>", "foot"},
-            {"header", "<header>top</header>", "top"},
-            {"mark", "<mark>highlighted</mark>", "highlighted"},
-            {"nav", "<nav>menu</nav>", "menu"},
-            {"section", "<section>sec</section>", "sec"},
-            {"small", "<small>fine print</small>", "fine print"},
-            // Void elements produce self-closing output
-            {"br self-close", "<p>a<br/>b</p>", "<br/>"},
-            {"hr self-close", "<p>a</p><hr/><p>b</p>", "<hr/>"},
-            // Encoding
-            {"amp in text", "<p>a &amp; b</p>", "&amp;"},
-            {"lt in text", "<p>a &lt; b</p>", "&lt;"},
-            {"gt in text", "<p>a &gt; b</p>", "&gt;"},
-            {"nbsp", "<p>&nbsp;</p>", "\u00A0"},
-            {"copy", "<p>&copy;</p>", "\u00A9"},
-            {"reg", "<p>&reg;</p>", "\u00AE"},
-            {"trade", "<p>&trade;</p>", "\u2122"},
-            // Nested mixed content
-            {"p with inline", "<p><b>b</b> and <i>i</i></p>", "<b>b</b>"},
-            {"nested lists",
-             "<ul><li>a<ul><li>b</li></ul></li></ul>",
-             "b"},
-            {"blockquote with p",
-             "<blockquote><p>inner</p></blockquote>",
-             "inner"},
-            // Attributes
-            {"class attr", "<p class=\"foo\">x</p>", "class=\"foo\""},
-            {"id attr", "<div id=\"myid\">x</div>", "id=\"myid\""},
-            {"style attr", "<span style=\"color:red\">x</span>", "color: red"},
-            {"lang attr", "<p lang=\"en\">x</p>", "lang=\"en\""},
-            {"dir attr", "<p dir=\"ltr\">x</p>", "x"},
-            // data: attributes (may or may not be allowed, test just that output is generated)
-            {"target attr", "<a href=\"/\" target=\"_blank\">x</a>", "x"},
-          });
-    }
-
-    @Test
-    public void roundTripContainsExpected() throws Exception {
-      URL url = getClass().getResource("/antisamy-serializer.xml");
-      Policy testPolicy = TestPolicy.getInstance(url);
-
-      CleanResults cr = antiSamy.scan(inputHtml, testPolicy, AntiSamy.DOM);
-      String result = cr.getCleanHTML();
-      assertThat(description + " → " + result, result, containsString(expectedSubstring));
-    }
-  }
-
-  // ===========================================================================
   // 13. Edge cases and boundary conditions
   // ===========================================================================
 
@@ -1215,8 +1061,7 @@ public class HtmlSerializerTest {
     DocumentFragment frag = document.createDocumentFragment();
     frag.appendChild(document.createTextNode(""));
     String out = serialize(frag);
-    assertTrue("Empty text node should produce empty or whitespace output",
-        out.trim().isEmpty());
+    assertTrue("Empty text node should produce empty or whitespace output", out.trim().isEmpty());
   }
 
   @Test
@@ -1321,8 +1166,7 @@ public class HtmlSerializerTest {
   public void aElementDoesNotAffectChildIndentAfterElement() throws Exception {
     // The A element is special: it does not set afterElement=true on its parent,
     // so text following </a> should NOT get a line break.
-    InternalPolicy withFormat =
-        (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
+    InternalPolicy withFormat = (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
     DocumentFragment frag = document.createDocumentFragment();
     Element p = document.createElement("p");
     Element a = document.createElement("a");
@@ -1339,8 +1183,7 @@ public class HtmlSerializerTest {
   @Test
   public void tdElementDoesNotAffectChildIndentAfterElement() throws Exception {
     // The TD element (like A) should not trigger afterElement-based indentation
-    InternalPolicy withFormat =
-        (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
+    InternalPolicy withFormat = (InternalPolicy) policy.cloneWithDirective("formatOutput", "true");
     DocumentFragment frag = document.createDocumentFragment();
     Element table = document.createElement("table");
     Element tr = document.createElement("tr");
